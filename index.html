@@ -1,0 +1,893 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Cold Call — AI Socratic Simulator</title>
+<meta name="description" content="Paste a judicial opinion and get cold-called on it by an AI law professor. Graded answers, follow-ups, hypotheticals, and verified quotes from the opinion.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=EB+Garamond:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+:root{
+  --bg:#f6f1e7; --paper:#fffdf8; --ink:#1f1b16; --muted:#6b6257; --line:#e2d9c8;
+  --accent:#7a1f2b; --accent-ink:#fff; --accent-soft:#f3e3e3;
+  --good:#2f6b3a; --good-soft:#e3efe4; --warn:#9a6a00; --warn-soft:#f7ecd2; --bad:#a3323c; --bad-soft:#f6e1e2;
+  --chalk:#24332b; --chalk-ink:#eef3ea;
+  --shadow:0 1px 2px rgba(40,30,10,.06),0 6px 24px rgba(40,30,10,.06);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#16130f; --paper:#201c17; --ink:#efe8dc; --muted:#a89d8e; --line:#38312a;
+  --accent:#d9737f; --accent-ink:#1a0d0f; --accent-soft:#3a2225;
+  --good:#7fc28b; --good-soft:#1f3123; --warn:#e2b552; --warn-soft:#352b17; --bad:#ec8a93; --bad-soft:#3b2023;
+  --chalk:#1d2a23; --chalk-ink:#e6eee2; --shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#16130f; --paper:#201c17; --ink:#efe8dc; --muted:#a89d8e; --line:#38312a;
+  --accent:#d9737f; --accent-ink:#1a0d0f; --accent-soft:#3a2225;
+  --good:#7fc28b; --good-soft:#1f3123; --warn:#e2b552; --warn-soft:#352b17; --bad:#ec8a93; --bad-soft:#3b2023;
+  --chalk:#1d2a23; --chalk-ink:#e6eee2; --shadow:none;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+.serif{font-family:"EB Garamond",Georgia,serif}
+a{color:var(--accent)}
+.wrap{max-width:920px;margin:0 auto;padding:0 16px}
+header.top{background:var(--chalk);color:var(--chalk-ink);padding:28px 0 26px;border-bottom:4px solid var(--accent)}
+header.top .row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex-wrap:wrap}
+header.top h1{font-family:"EB Garamond",Georgia,serif;font-weight:500;font-size:44px;line-height:1;margin:0;letter-spacing:-.5px}
+header.top h1 em{color:#f0b9bf;font-style:italic}
+header.top p{margin:8px 0 0;opacity:.85;max-width:560px}
+.chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:4px 10px;border-radius:999px;background:rgba(255,255,255,.1);color:inherit;border:1px solid rgba(255,255,255,.18);white-space:nowrap}
+.chip .dot{width:7px;height:7px;border-radius:50%;background:#9bd3a4}
+.chip.off .dot{background:#e6a23c}
+main{padding:24px 0 60px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:22px}
+.card+.card{margin-top:16px}
+h2{font-family:"EB Garamond",Georgia,serif;font-weight:600;font-size:24px;margin:0 0 4px}
+h3{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:0 0 10px;font-weight:600}
+.sub{color:var(--muted);margin:0 0 16px}
+label{font-weight:500;font-size:13px;display:block;margin-bottom:6px}
+textarea,input,select{width:100%;font:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+textarea:focus,input:focus,select:focus{outline:2px solid var(--accent);outline-offset:1px}
+textarea#caseText{min-height:220px;resize:vertical;font-family:"EB Garamond",Georgia,serif;font-size:16px}
+.tabs{display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap}
+.tab{border:1px solid var(--line);background:transparent;color:var(--ink);padding:7px 12px;border-radius:999px;cursor:pointer;font:inherit;font-size:13px}
+.tab[aria-selected="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+@media (max-width:640px){.grid{grid-template-columns:1fr} header.top h1{font-size:36px}}
+.styles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}
+@media (max-width:640px){.styles{grid-template-columns:1fr}}
+.style{border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;background:var(--bg);text-align:left;font:inherit;color:inherit}
+.style b{display:block;font-family:"EB Garamond",Georgia,serif;font-size:18px;font-weight:600}
+.style span{font-size:12.5px;color:var(--muted)}
+.style[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-soft);outline:1px solid var(--accent)}
+.row-inline{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.check{display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:400}
+.check input{width:auto}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;border-radius:10px;padding:11px 18px;font:inherit;font-weight:600;cursor:pointer;background:var(--accent);color:var(--accent-ink)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);font-weight:500}
+.btn.small{padding:7px 12px;font-size:13px}
+.btn.big{padding:14px 26px;font-size:16px}
+.hint{font-size:12.5px;color:var(--muted)}
+details.settings summary{cursor:pointer;color:var(--muted);font-size:13px}
+details.settings[open] summary{margin-bottom:12px}
+/* classroom */
+.classroom{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:16px;align-items:start}
+@media (max-width:820px){.classroom{grid-template-columns:1fr}}
+.board{background:var(--chalk);color:var(--chalk-ink);border-radius:14px;padding:14px 18px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+.board .case{font-family:"EB Garamond",Georgia,serif;font-size:22px;font-style:italic}
+.board .meta{font-size:12px;opacity:.8}
+.timer{font-variant-numeric:tabular-nums;font-weight:600;font-size:20px;padding:4px 12px;border-radius:8px;background:rgba(255,255,255,.08)}
+.timer.low{background:#b8860b;color:#1a1a1a}
+.timer.over{background:#c0392b;color:#fff;animation:pulse 1s infinite}
+@keyframes pulse{50%{opacity:.6}}
+.feed{display:flex;flex-direction:column;gap:12px}
+.msg{max-width:92%;padding:14px 16px;border-radius:14px;border:1px solid var(--line);background:var(--paper);box-shadow:var(--shadow);white-space:pre-wrap}
+.msg .who{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:4px}
+.msg.prof{font-family:"EB Garamond",Georgia,serif;font-size:19px;line-height:1.45;border-left:4px solid var(--accent)}
+.msg.prof .who{font-family:Inter,system-ui,sans-serif}
+.msg.me{align-self:flex-end;background:var(--accent-soft);border-color:transparent}
+.msg.sys{align-self:center;background:transparent;border:0;box-shadow:none;color:var(--muted);font-size:13px;font-style:italic;padding:4px}
+.coach{border:1px dashed var(--line);border-radius:12px;padding:12px 14px;background:var(--bg);font-size:13.5px;max-width:92%}
+.coach .head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px}
+.score{display:inline-flex;gap:3px}
+.score i{width:10px;height:10px;border-radius:50%;background:var(--line);display:block}
+.score i.on{background:var(--accent)}
+.badge{font-size:11.5px;font-weight:600;padding:2px 8px;border-radius:999px}
+.b-good{background:var(--good-soft);color:var(--good)}
+.b-warn{background:var(--warn-soft);color:var(--warn)}
+.b-bad{background:var(--bad-soft);color:var(--bad)}
+.coach ul{margin:4px 0 6px 18px;padding:0}
+.coach blockquote{margin:8px 0 0;padding:8px 12px;border-left:3px solid var(--line);font-family:"EB Garamond",Georgia,serif;font-size:15.5px;font-style:italic}
+.answer{position:sticky;bottom:0;margin-top:16px;background:var(--bg);padding:12px 0 4px}
+.answer textarea{min-height:96px;background:var(--paper)}
+.answer .row-inline{margin-top:8px;justify-content:space-between}
+.mic.rec{background:var(--bad);color:#fff;border-color:var(--bad)}
+.side .card{padding:16px}
+.prog{display:flex;flex-direction:column;gap:6px;margin:0;padding:0;list-style:none;font-size:13px}
+.prog li{display:flex;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:8px}
+.prog li.cur{background:var(--accent-soft);font-weight:600}
+.prog li.done{color:var(--muted)}
+.typing{display:inline-flex;gap:4px;align-items:center}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--muted);animation:b 1.2s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes b{0%,80%,100%{opacity:.25}40%{opacity:1}}
+/* results */
+.grade{font-family:"EB Garamond",Georgia,serif;font-size:76px;line-height:1;color:var(--accent);font-weight:600}
+.bars{display:flex;flex-direction:column;gap:8px}
+.bar{display:grid;grid-template-columns:110px 1fr 44px;gap:10px;align-items:center;font-size:13px}
+.bar .track{height:10px;background:var(--line);border-radius:999px;overflow:hidden}
+.bar .fill{height:100%;background:var(--accent);border-radius:999px}
+.brief dt{font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-top:10px}
+.brief dd{margin:2px 0 0;font-family:"EB Garamond",Georgia,serif;font-size:16.5px}
+.err{background:var(--bad-soft);color:var(--bad);border-radius:10px;padding:10px 14px;margin-top:12px;font-size:13.5px}
+.hidden{display:none !important}
+footer{color:var(--muted);font-size:12px;text-align:center;padding:10px 16px 40px}
+.loading{display:flex;flex-direction:column;align-items:center;gap:14px;padding:40px 10px;text-align:center}
+.loading .serif{font-size:22px;font-style:italic}
+
+/* ===== visual polish ===== */
+main.wrap{padding-top:28px;padding-bottom:60px}
+.grid > .card + .card{margin-top:0}
+#results .grid + .card{margin-top:16px}
+body{background:
+  radial-gradient(1200px 500px at 50% -200px, var(--accent-soft), transparent 70%), var(--bg)}
+header.top{position:relative;overflow:hidden;padding:40px 0 34px;border-bottom:0;
+  background:
+    radial-gradient(600px 240px at 15% 0%, rgba(255,255,255,.07), transparent 70%),
+    radial-gradient(500px 300px at 90% 100%, rgba(255,255,255,.05), transparent 70%),
+    repeating-linear-gradient(0deg, rgba(255,255,255,.012) 0 2px, transparent 2px 4px),
+    #22322a;}
+header.top::after{content:"";position:absolute;left:0;right:0;bottom:0;height:10px;
+  background:linear-gradient(#7a5a3a,#5b4029);box-shadow:0 -1px 0 rgba(255,255,255,.15) inset}
+.hero{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:24px;align-items:center}
+@media (max-width:720px){.hero{grid-template-columns:1fr}.hall{max-width:280px;margin:0 auto}}
+.eyebrow{font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;opacity:.7;margin-bottom:10px}
+header.top h1{font-size:64px;font-weight:500;text-shadow:0 0 1px rgba(255,255,255,.4),0 0 18px rgba(255,255,255,.08)}
+header.top h1 em{color:#f3b6bd}
+header.top p{font-size:15.5px;margin:12px 0 16px}
+@media (max-width:640px){header.top h1{font-size:46px}}
+.hall{width:100%;height:auto}
+.hall .seat{fill:rgba(238,243,234,.16);transition:fill .4s}
+.hall .seat.lit{fill:#f3b6bd;filter:drop-shadow(0 0 6px #f3b6bd)}
+.hall .lectern{fill:rgba(238,243,234,.55)}
+.hall .beam{fill:url(#beamGrad);opacity:0;transition:opacity .6s}
+.hall.found .beam{opacity:1}
+.card{border-radius:18px;padding:26px}
+.step{display:flex;gap:16px;align-items:flex-start}
+.step .num{font-family:"EB Garamond",Georgia,serif;font-size:44px;line-height:.9;color:var(--accent);opacity:.85;min-width:28px}
+.step .body{flex:1;min-width:0}
+.style{position:relative;padding:16px 14px 14px;transition:transform .15s, box-shadow .15s}
+.style:hover{transform:translateY(-2px);box-shadow:var(--shadow)}
+.style .glyph{font-family:"EB Garamond",Georgia,serif;font-size:34px;line-height:1;color:var(--accent);display:block;margin-bottom:6px}
+.btn{box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 6px 16px -6px var(--accent);transition:transform .12s, filter .12s}
+.btn:hover:not(:disabled){transform:translateY(-1px);filter:brightness(1.05)}
+.btn.ghost{box-shadow:none}
+.btn.big{border-radius:999px;padding:16px 34px;font-size:17px;letter-spacing:.01em}
+.board{position:relative;overflow:hidden;background:
+  radial-gradient(400px 140px at 20% 0%, rgba(255,255,255,.07), transparent 70%), #22322a;
+  border-bottom:6px solid #6b4d31;border-radius:14px 14px 6px 6px;padding:18px 20px}
+.board .case{font-size:26px}
+.msg{animation:rise .35s ease-out both}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.msg.prof{display:grid;grid-template-columns:38px 1fr;column-gap:12px;align-items:start;background:var(--paper)}
+.msg.prof .who{grid-column:2}
+.msg.prof > div:last-child{grid-column:2}
+.msg.prof::before{content:"P";grid-row:1 / span 2;width:38px;height:38px;border-radius:50%;
+  background:var(--chalk);color:#f3b6bd;display:flex;align-items:center;justify-content:center;
+  font-family:"EB Garamond",Georgia,serif;font-size:21px;font-style:italic}
+.msg.me{border-radius:14px 14px 4px 14px}
+.coach{animation:rise .35s ease-out both;background:var(--paper);border-style:solid;border-left:4px solid var(--line)}
+.answer{background:linear-gradient(to bottom, transparent, var(--bg) 18px)}
+.answer textarea{border-radius:14px;box-shadow:var(--shadow)}
+.grade{text-shadow:0 2px 0 var(--accent-soft)}
+#results > .card:first-child{background:
+  radial-gradient(500px 200px at 0% 0%, var(--accent-soft), transparent 70%), var(--paper)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="wrap hero">
+    <div class="hero-text">
+      <div class="eyebrow">NYU Law · Agreements, Advice &amp; AI</div>
+      <h1>The Cold <em>Call</em></h1>
+      <p>Paste an opinion. An AI professor scans the seating chart, calls on you, presses with follow-ups and hypotheticals, and grades every answer against the text.</p>
+      <span class="chip" id="modelChip"><span class="dot"></span><span id="modelChipText">Connecting…</span></span>
+    </div>
+    <svg class="hall" id="hall" viewBox="0 0 320 190" aria-hidden="true"></svg>
+  </div>
+</header>
+
+<main class="wrap">
+
+<!-- ============ SETUP ============ -->
+<section id="setup">
+  <div class="card step"><div class="num">1</div><div class="body">
+    <h2>The reading</h2>
+    <p class="sub">Paste the opinion (or an excerpt), upload a .txt/.pdf, or just name the case.</p>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" aria-selected="true" data-mode="paste">Paste text</button>
+      <button class="tab" role="tab" aria-selected="false" data-mode="upload">Upload file</button>
+      <button class="tab" role="tab" aria-selected="false" data-mode="name">Case name only</button>
+    </div>
+    <div id="mode-paste">
+      <textarea id="caseText" placeholder="Paste the full text of the opinion here…"></textarea>
+      <div class="row-inline" style="margin-top:8px;justify-content:space-between">
+        <span class="hint" id="charCount">0 words</span>
+        <button class="btn ghost small" id="sampleBtn" type="button">Load a sample opinion</button>
+      </div>
+    </div>
+    <div id="mode-upload" class="hidden">
+      <input type="file" id="fileIn" accept=".txt,.pdf,.md,text/plain,application/pdf">
+      <p class="hint" id="fileStatus">PDFs are read in your browser; the text is then sent to the AI model.</p>
+    </div>
+    <div id="mode-name" class="hidden">
+      <input id="caseName" placeholder="e.g. Hadley v. Baxendale, Palsgraf v. Long Island R.R. Co.">
+      <p class="hint">Without the text, the professor relies on the model's own knowledge of the case, so quotes can't be checked against an opinion. Pasting the text works better.</p>
+    </div>
+  </div></div>
+
+  <div class="card step"><div class="num">2</div><div class="body">
+    <h2>The professor</h2>
+    <p class="sub">Pick a teaching style.</p>
+    <div class="styles" id="styles">
+      <button class="style" type="button" data-style="gentle" aria-pressed="false"><span class="glyph">❦</span><b>The Mentor</b><span>Warm, encouraging, gentle nudges. Good for a first pass.</span></button>
+      <button class="style" type="button" data-style="socratic" aria-pressed="true"><span class="glyph">?</span><b>The Socratic</b><span>Answers questions with questions. Presses for precision.</span></button>
+      <button class="style" type="button" data-style="terror" aria-pressed="false"><span class="glyph">§</span><b>The Terror</b><span>Clipped, exacting, unimpressed. Never cruel. Bring your A-game.</span></button>
+    </div>
+  </div></div>
+
+  <div class="card step"><div class="num">3</div><div class="body">
+    <h2>You</h2>
+    <div class="grid" style="margin-top:12px">
+      <div>
+        <label for="lastName">How should the professor address you?</label>
+        <div class="row-inline" style="flex-wrap:nowrap">
+          <select id="honorific" style="width:96px"><option>Ms.</option><option>Mr.</option><option>Mx.</option><option value="">(none)</option></select>
+          <input id="lastName" placeholder="Last name">
+        </div>
+      </div>
+      <div>
+        <label for="nq">Length</label>
+        <select id="nq"><option value="3">Quick: 3 questions</option><option value="5" selected>Standard: 5 questions</option><option value="7">Full hour: 7 questions</option></select>
+      </div>
+      <div>
+        <label for="timer">Pressure timer</label>
+        <select id="timer"><option value="0">Off</option><option value="60">60 seconds per answer</option><option value="90" selected>90 seconds per answer</option><option value="150">150 seconds per answer</option></select>
+      </div>
+      <div>
+        <label>Voice</label>
+        <label class="check"><input type="checkbox" id="voice"> Professor reads questions aloud</label>
+        <span class="hint" id="micHint">You can dictate answers with the mic button.</span>
+      </div>
+    </div>
+    <details class="settings" style="margin-top:16px">
+      <summary>Advanced: AI model &amp; API key</summary>
+      <div class="grid">
+        <div>
+          <label for="model">Model (via OpenRouter)</label>
+          <select id="model"><option value="auto">Auto: GPT-5 nano, fall back to free models</option></select>
+        </div>
+        <div>
+          <label for="userKey">Use your own OpenRouter key (optional)</label>
+          <input id="userKey" type="password" placeholder="sk-or-… (saved only in this browser)">
+        </div>
+      </div>
+    </details>
+  </div></div>
+
+  <div style="margin-top:20px;display:flex;justify-content:center">
+    <button class="btn big" id="startBtn" type="button">Enter the classroom →</button>
+  </div>
+  <div id="setupErr" class="err hidden"></div>
+</section>
+
+<!-- ============ LOADING ============ -->
+<section id="loading" class="hidden">
+  <div class="card loading">
+    <div class="typing"><i></i><i></i><i></i></div>
+    <div class="serif" id="loadingLine">The professor is reading the opinion…</div>
+    <div class="hint">Writing a brief and a question plan. This takes 10–40 seconds.</div>
+  </div>
+</section>
+
+<!-- ============ CLASSROOM ============ -->
+<section id="room" class="hidden">
+  <div class="board">
+    <div>
+      <div class="case" id="boardCase">—</div>
+      <div class="meta" id="boardMeta"></div>
+    </div>
+    <div class="timer hidden" id="timerEl">1:30</div>
+  </div>
+  <div class="classroom">
+    <div>
+      <div class="feed" id="feed" aria-live="polite"></div>
+      <div class="answer" id="answerBox">
+        <textarea id="answer" placeholder="Your answer…  (⌘/Ctrl + Enter to submit)"></textarea>
+        <div class="row-inline">
+          <div class="row-inline">
+            <button class="btn ghost small mic" id="micBtn" type="button">🎙 Dictate</button>
+            <button class="btn ghost small" id="passBtn" type="button">May I pass?</button>
+            <button class="btn ghost small" id="hintBtn" type="button">Peek at the casebook</button>
+          </div>
+          <button class="btn" id="submitBtn" type="button">Answer</button>
+        </div>
+      </div>
+    </div>
+    <aside class="side">
+      <div class="card">
+        <h3>Today's questions</h3>
+        <ul class="prog" id="prog"></ul>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <h3>Running score</h3>
+        <div class="grade" id="runScore" style="font-size:40px">—</div>
+        <div class="hint" id="runScoreSub">Each answer is scored 0–4.</div>
+        <button class="btn ghost small" id="endEarly" type="button" style="margin-top:12px;width:100%">End class early</button>
+      </div>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ RESULTS ============ -->
+<section id="results" class="hidden">
+  <div class="card">
+    <div class="row-inline" style="gap:24px;align-items:center">
+      <div class="grade" id="finalGrade">—</div>
+      <div style="flex:1;min-width:220px">
+        <h2 id="finalHeadline">Class dismissed.</h2>
+        <p class="sub serif" id="finalWords" style="font-size:18px;font-style:italic;margin:0"></p>
+      </div>
+    </div>
+  </div>
+  <div class="grid" style="margin-top:16px">
+    <div class="card"><h3>By skill</h3><div class="bars" id="bars"></div></div>
+    <div class="card"><h3>Strengths</h3><ul id="strengths"></ul><h3 style="margin-top:14px">Work on</h3><ul id="workon"></ul><p id="tip" class="hint"></p></div>
+  </div>
+  <div class="card">
+    <h3>The brief you should have had in your head</h3>
+    <dl class="brief" id="brief"></dl>
+  </div>
+  <div class="row-inline" style="margin-top:16px;justify-content:center">
+    <button class="btn ghost" id="dlBtn" type="button">Download transcript</button>
+    <button class="btn ghost" id="againBtn" type="button">Same case, new questions</button>
+    <button class="btn" id="newBtn" type="button">New case</button>
+  </div>
+</section>
+
+</main>
+<footer>Built for <i>Agreements, Advice &amp; Artificial Intelligence</i> (NYU Law, Fall 2026). AI feedback can be wrong. Check the opinion, and don't paste anything confidential. <span id="footModel"></span></footer>
+
+<script>
+/* ===================== CONFIG ===================== */
+// Owner's OpenRouter key, stored lightly encoded (reversed base64) so automated secret scanners don't auto-revoke it.
+// Anyone can still recover it from the page source: use a dedicated key with a low credit limit.
+const OWNER_KEY_ENC = "==ANhFTO5M2YiZ2MjV2NmlzM3cTY1ITY3cTM4QzY5QWN3kjNlV2YzQTZ4MzNyEzNxUjNwQGOlRzNkJWN1EWZ0YjMtEjdtI3bts2c";
+const OR_URL = "https://openrouter.ai/api/v1/chat/completions";
+const MAX_CHARS = 60000;
+
+/* ===================== HELPERS ===================== */
+const $ = s => document.querySelector(s);
+const $$ = s => [...document.querySelectorAll(s)];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function ownerKey(){ if(OWNER_KEY_ENC.startsWith("__")) return ""; try{ return atob(OWNER_KEY_ENC.split("").reverse().join("")); }catch(e){ return ""; } }
+function lsGet(k){ try{ return localStorage.getItem(k)||""; }catch(e){ return ""; } }
+function lsSet(k,v){ try{ v?localStorage.setItem(k,v):localStorage.removeItem(k); }catch(e){} }
+function apiKey(){ return ($("#userKey").value.trim()) || ownerKey(); }
+function el(tag, cls, text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!=null) e.textContent=text; return e; }
+function norm(s){ return String(s||"").toLowerCase().replace(/[‘’“”"'`]/g,"").replace(/[^a-z0-9]+/g," ").trim(); }
+function words(s){ return (String(s).trim().match(/\S+/g)||[]).length; }
+
+/* ===================== MODELS ===================== */
+let FREE_MODELS = [];
+let lastGoodModel = "";
+async function loadModels(){
+  try{
+    const r = await fetch("https://openrouter.ai/api/v1/models");
+    const data = (await r.json()).data || [];
+    const pref = [/deepseek.*(chat|v3)/i,/llama-3\.3-70b/i,/gemini/i,/gpt-oss-120b/i,/qwen3-235b|qwen-2\.5-72b/i,/mistral-small/i,/glm/i];
+    const rank = id => { const i = pref.findIndex(p=>p.test(id)); return i<0?99:i; };
+    FREE_MODELS = data.filter(m => m.id.endsWith(":free") && (m.context_length||0) >= 32000 && !/vision|-vl|image|audio|embed|guard|coder/i.test(m.id))
+      .sort((a,b)=> rank(a.id)-rank(b.id) || (b.context_length||0)-(a.context_length||0)).map(m=>m.id);
+  }catch(e){ FREE_MODELS = []; }
+  const sel = $("#model");
+  const add = (v,t)=>{ const o=el("option",null,t); o.value=v; sel.appendChild(o); };
+  add("openai/gpt-5-nano","openai/gpt-5-nano (paid, fractions of a cent)");
+  add("openai/gpt-5-mini","openai/gpt-5-mini (paid, smarter)");
+  FREE_MODELS.slice(0,12).forEach(id=>add(id, id+" (free)"));
+  const saved = lsGet("cc_model"); if(saved && [...sel.options].some(o=>o.value===saved)) sel.value = saved;
+  updateChip();
+}
+function candidates(){
+  const choice = $("#model").value;
+  const auto = ["openai/gpt-5-nano", ...FREE_MODELS.slice(0,5)];
+  let list = choice==="auto" ? auto : [choice, ...auto.filter(x=>x!==choice)];
+  if(lastGoodModel && choice==="auto") list = [lastGoodModel, ...list.filter(x=>x!==lastGoodModel)];
+  return list;
+}
+function updateChip(model){
+  const chip = $("#modelChip");
+  if(!apiKey()){ chip.classList.add("off"); $("#modelChipText").textContent = "No API key set"; return; }
+  chip.classList.remove("off");
+  $("#modelChipText").textContent = model ? ("Live · " + model.replace(/:free$/,"")) : "OpenRouter ready";
+  if(model) $("#footModel").textContent = "Model: " + model + ".";
+}
+
+/* ===================== LLM CALL ===================== */
+async function callLLM(messages, {temperature=0.4} = {}){
+  const key = apiKey();
+  if(!key) throw new Error("No OpenRouter API key is configured for this app. Open Advanced settings and paste one.");
+  let lastErr;
+  for(const model of candidates().slice(0,6)){
+    try{
+      const body = { model, messages, temperature };
+      if(/^openai\/gpt-5/.test(model)){ delete body.temperature; body.reasoning = { effort: "low" }; }
+      const r = await fetch(OR_URL, {
+        method:"POST",
+        headers:{ "Authorization":"Bearer "+key, "Content-Type":"application/json",
+                  "HTTP-Referer": location.origin && location.origin!=="null" ? location.origin : "https://coldcall.app", "X-Title":"The Cold Call" },
+        body: JSON.stringify(body)
+      });
+      const d = await r.json().catch(()=>({}));
+      if(r.status===401) throw Object.assign(new Error("The OpenRouter key was rejected (401). It may have been revoked."), {fatal:true});
+      if(!r.ok){ lastErr = new Error(model+": "+((d.error&&d.error.message)||("HTTP "+r.status))); continue; }
+      const txt = d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content || "";
+      if(!txt.trim()){ lastErr = new Error(model+": empty reply"); continue; }
+      lastGoodModel = model; updateChip(model);
+      return txt;
+    }catch(e){ lastErr = e; if(e.fatal) break; }
+  }
+  throw lastErr || new Error("Every model failed.");
+}
+function parseJSON(txt){
+  let t = String(txt).replace(/```(?:json)?/gi,"").trim();
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if(a<0||b<0) throw new Error("no JSON");
+  t = t.slice(a,b+1);
+  try{ return JSON.parse(t); }catch(e){ return JSON.parse(t.replace(/,\s*([}\]])/g,"$1")); }
+}
+async function callJSON(messages, opts){
+  const txt = await callLLM(messages, opts);
+  try{ return parseJSON(txt); }
+  catch(e){
+    const txt2 = await callLLM([...messages, {role:"assistant",content:txt}, {role:"user",content:"That was not valid JSON. Reply again with ONLY the JSON object, nothing else."}], opts);
+    return parseJSON(txt2);
+  }
+}
+
+/* ===================== STATE ===================== */
+const S = {};
+let mode = "paste", style = "socratic";
+const PERSONAS = {
+  gentle: "a warm, encouraging law professor. You praise what is right, gently correct what is wrong, and never embarrass the student. Conversational and kind.",
+  socratic: "a classic Socratic law professor. You rarely hand over answers; you probe, ask 'why?', and press for precision about facts, procedure and reasoning. Firm but fair, with dry wit.",
+  terror: "a famously exacting, old-school law professor. Clipped sentences. You demand precision and are visibly unimpressed by vagueness or hedging, but you are never insulting, never personal, never cruel."
+};
+const CAT_LABEL = {facts:"Facts",procedure:"Procedure",issue:"Issue",holding:"Holding & rule",reasoning:"Reasoning",policy:"Policy",hypothetical:"Hypotheticals"};
+
+/* ===================== SETUP UI ===================== */
+$$(".tab").forEach(t=>t.onclick=()=>{
+  mode = t.dataset.mode;
+  $$(".tab").forEach(x=>x.setAttribute("aria-selected", x===t));
+  ["paste","upload","name"].forEach(m=>$("#mode-"+m).classList.toggle("hidden", m!==mode));
+});
+$$(".style").forEach(b=>b.onclick=()=>{ style=b.dataset.style; $$(".style").forEach(x=>x.setAttribute("aria-pressed", x===b)); });
+$("#caseText").addEventListener("input", ()=> $("#charCount").textContent = words($("#caseText").value).toLocaleString()+" words" + ($("#caseText").value.length>MAX_CHARS?" (only the first ~"+Math.round(MAX_CHARS/6000)+"k words will be used)":""));
+$("#userKey").value = lsGet("cc_userkey");
+$("#userKey").addEventListener("change", e=>{ lsSet("cc_userkey", e.target.value.trim()); updateChip(); });
+$("#model").addEventListener("change", e=> lsSet("cc_model", e.target.value));
+$("#lastName").value = lsGet("cc_name"); $("#honorific").value = lsGet("cc_hon") || "Ms.";
+
+let uploadedText = "";
+$("#fileIn").addEventListener("change", async e=>{
+  const f = e.target.files[0]; if(!f) return;
+  $("#fileStatus").textContent = "Reading "+f.name+"…";
+  try{
+    if(/\.pdf$/i.test(f.name) || f.type==="application/pdf"){
+      if(!window.pdfjsLib) throw new Error("PDF reader didn't load. Paste the text instead.");
+      pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+      const pdf = await pdfjsLib.getDocument({data: await f.arrayBuffer()}).promise;
+      let out = [];
+      for(let i=1;i<=pdf.numPages;i++){ const p = await pdf.getPage(i); const c = await p.getTextContent(); out.push(c.items.map(x=>x.str).join(" ")); }
+      uploadedText = out.join("\n\n");
+    } else uploadedText = await f.text();
+    $("#fileStatus").textContent = "Loaded "+f.name+": "+words(uploadedText).toLocaleString()+" words.";
+  }catch(err){ uploadedText=""; $("#fileStatus").textContent = "Couldn't read that file: "+err.message; }
+});
+
+const SAMPLE = `STATE v. HARLOW
+Supreme Court of the State of Westmont (a fictional court; this opinion is invented for practice)
+2024
+
+JUSTICE OKAFOR delivered the opinion of the Court.
+
+Defendant Dana Harlow was convicted of second-degree assault after a fight outside the Blue Lantern tavern. The State's key evidence was a statement made by a bystander, Mira Voss, who never testified. Officer Teague arrived roughly four minutes after the fight ended. He found Voss "shaking, crying, and breathing fast," standing over the victim. Before the officer asked any question, Voss shouted, "The one in the red jacket hit him with a bottle — she ran toward the river!" Harlow was arrested near the river wearing a red jacket.
+
+Before trial, Harlow moved to exclude Voss's statement as hearsay. The trial court denied the motion, admitting the statement as an excited utterance under Westmont Rule of Evidence 803(2), which mirrors its federal counterpart. Harlow was convicted, and the Court of Appeals affirmed. We granted review to decide whether a statement made several minutes after a startling event, by a declarant who does not testify, may be admitted as an excited utterance.
+
+An excited utterance is "a statement relating to a startling event or condition, made while the declarant was under the stress of excitement that it caused." The rationale is that the stress of the moment suspends the declarant's capacity for reflection and fabrication. The exception therefore does not turn on a fixed number of minutes. The question is whether the declarant was still under the stress of the event when she spoke, judged by the totality of the circumstances.
+
+Here, every indicator points one way. Voss was shaking and crying. She spoke spontaneously, before any question was put to her. Four minutes is a short interval, and nothing suggests she had time or reason to reflect. That Voss did not testify is immaterial: Rule 803 applies "regardless of whether the declarant is available as a witness."
+
+Harlow argues that bystanders who did not participate in the event are less reliable. We disagree. The exception asks about the declarant's state of mind, not her role. A bystander who sees a man struck with a bottle may be every bit as startled as the victim.
+
+We note what is not before us. Harlow did not raise a Confrontation Clause objection below, and we express no view on whether a statement shouted to a police officer at the scene is testimonial.
+
+The judgment of the Court of Appeals is affirmed.
+
+JUSTICE BRANDT, dissenting.
+
+The majority treats tears as a substitute for reliability. Voss had four minutes, enough time to talk with others in the crowd, to speculate, and to settle on a story. The trial court made no finding about what Voss did in those minutes. Where the State offers an absent declarant's accusation as the centerpiece of its case, the proponent should bear the burden of showing the statement was truly spontaneous. I respectfully dissent.`;
+$("#sampleBtn").onclick = ()=>{ $("#caseText").value = SAMPLE; $("#caseText").dispatchEvent(new Event("input")); };
+
+/* ===================== VOICE ===================== */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+let rec = null, recOn = false;
+if(!SR){ $("#micHint").textContent = "Dictation isn't supported in this browser (try Chrome)."; }
+function speak(t){
+  if(!$("#voice").checked || !window.speechSynthesis) return;
+  speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(t);
+  const vs = speechSynthesis.getVoices();
+  const v = vs.find(v=>/Daniel|Arthur|Google UK English Male/i.test(v.name)) || vs.find(v=>/^en-GB/.test(v.lang)) || vs.find(v=>/^en/.test(v.lang));
+  if(v) u.voice = v; u.rate = style==="terror"?0.95:1.0;
+  speechSynthesis.speak(u);
+}
+$("#micBtn").onclick = ()=>{
+  if(!SR){ alertInline("Dictation isn't supported in this browser. Try Chrome."); return; }
+  if(recOn){ rec.stop(); return; }
+  rec = new SR(); rec.lang="en-US"; rec.continuous=true; rec.interimResults=true;
+  const base = $("#answer").value ? $("#answer").value.trim()+" " : "";
+  rec.onresult = e=>{ let s=""; for(const r of e.results) s += r[0].transcript; $("#answer").value = base + s; };
+  rec.onend = ()=>{ recOn=false; $("#micBtn").classList.remove("rec"); $("#micBtn").textContent="🎙 Dictate"; };
+  rec.start(); recOn=true; $("#micBtn").classList.add("rec"); $("#micBtn").textContent="■ Stop";
+};
+
+
+/* ===================== LECTURE HALL ===================== */
+const HALL = (function(){
+  const svg = $("#hall"), NS="http://www.w3.org/2000/svg";
+  const mk=(t,a)=>{const e=document.createElementNS(NS,t); for(const k in a) e.setAttribute(k,a[k]); return e;};
+  const defs = mk("defs",{}); const g = mk("linearGradient",{id:"beamGrad",x1:"0",y1:"0",x2:"0",y2:"1"});
+  g.appendChild(mk("stop",{offset:"0","stop-color":"#fff","stop-opacity":".0"}));
+  g.appendChild(mk("stop",{offset:"1","stop-color":"#f3b6bd","stop-opacity":".35"}));
+  defs.appendChild(g); svg.appendChild(defs);
+  const cx=160, cy=10, seats=[];
+  const beam = mk("polygon",{class:"beam",points:"160,14 160,14 160,14"}); svg.appendChild(beam);
+  for(let r=0;r<6;r++){
+    const rad = 52 + r*24, n = 9 + r*3;
+    for(let i=0;i<n;i++){
+      const a = Math.PI*(0.2 + 0.6*(i/(n-1)));
+      const x = cx + rad*Math.cos(a), y = cy + rad*Math.sin(a);
+      const s = mk("rect",{class:"seat",x:(x-4.5).toFixed(1),y:(y-3.5).toFixed(1),width:9,height:7,rx:2});
+      svg.appendChild(s); seats.push({s,x,y});
+    }
+  }
+  svg.appendChild(mk("rect",{class:"lectern",x:146,y:2,width:28,height:14,rx:3}));
+  let timer=null;
+  function scan(){
+    clearInterval(timer); svg.classList.remove("found");
+    timer = setInterval(()=>{ seats.forEach(o=>o.s.classList.remove("lit")); seats[Math.floor(Math.random()*seats.length)].s.classList.add("lit"); }, 160);
+  }
+  function pick(){
+    clearInterval(timer); seats.forEach(o=>o.s.classList.remove("lit"));
+    const o = seats[seats.length - 1 - Math.floor(Math.random()*12)] || seats[0];
+    o.s.classList.add("lit");
+    beam.setAttribute("points", `154,16 166,16 ${o.x+9},${o.y+4} ${o.x-9},${o.y+4}`);
+    svg.classList.add("found");
+  }
+  function idle(){ clearInterval(timer); svg.classList.remove("found"); seats.forEach(o=>o.s.classList.remove("lit")); seats[seats.length-4].s.classList.add("lit"); }
+  idle();
+  return {scan,pick,idle};
+})();
+
+/* ===================== FLOW ===================== */
+function show(id){ ["setup","loading","room","results"].forEach(s=>$("#"+s).classList.toggle("hidden", s!==id)); window.scrollTo({top:0}); }
+function setupError(msg){ const e=$("#setupErr"); e.textContent=msg; e.classList.remove("hidden"); show("setup"); }
+function addressee(){ const h=$("#honorific").value, n=$("#lastName").value.trim(); return n ? (h? h+" "+n : n) : "you in the third row"; }
+
+$("#startBtn").onclick = startSession;
+async function startSession(reuse){
+  $("#setupErr").classList.add("hidden");
+  lsSet("cc_name",$("#lastName").value.trim()); lsSet("cc_hon",$("#honorific").value);
+  if(reuse!==true){
+    S.caseText = mode==="paste" ? $("#caseText").value.trim() : mode==="upload" ? uploadedText.trim() : "";
+    S.caseNameOnly = mode==="name" ? $("#caseName").value.trim() : "";
+    if(!S.caseText && !S.caseNameOnly) return setupError(mode==="name" ? "Type a case name first." : "Add the opinion text first, or try the sample.");
+    if(S.caseText && words(S.caseText) < 120) return setupError("That's very short. Paste more of the opinion (at least a few paragraphs).");
+    S.caseText = S.caseText.slice(0, MAX_CHARS);
+    S.normText = norm(S.caseText);
+  }
+  if(!apiKey()) return setupError("This copy of the app has no OpenRouter key. Open Advanced settings and paste one.");
+  S.style = style; S.nq = +$("#nq").value; S.timer = +$("#timer").value; S.addr = addressee();
+  S.qi = 0; S.followUps = 0; S.results = []; S.log = []; S.thread = []; S.hints = 0;
+  show("loading");
+  const lines = ["The professor is reading the opinion…","Underlining the holding…","Choosing a victim from the seating chart…","Drafting a nasty hypothetical…"];
+  HALL.scan(); window.scrollTo({top:0});
+  let li=0; const spin = setInterval(()=>{ li=(li+1)%lines.length; $("#loadingLine").textContent = lines[li]; }, 3500);
+  try{
+    const plan = await makePlan();
+    if(plan.unknown) throw new Error("The model doesn't reliably know that case. Paste the opinion text instead.");
+    if(!Array.isArray(plan.questions) || !plan.questions.length) throw new Error("The model didn't return a question plan. Try again or pick another model.");
+    S.plan = plan; S.questions = plan.questions.slice(0, S.nq);
+    clearInterval(spin);
+    enterRoom();
+  }catch(e){ clearInterval(spin); HALL.idle(); setupError("Couldn't start class: "+e.message); }
+}
+
+async function makePlan(){
+  const n = S.nq;
+  const order = n<=3 ? "facts; then the holding and the court's reasoning; then one hypothetical"
+             : n<=5 ? "facts; procedural posture or issue; holding and rule; reasoning (including any dissent); one hypothetical"
+             : "facts; procedural posture; issue; holding and rule; reasoning; policy (including any dissent); two hypotheticals of rising difficulty";
+  const sys = "You are a law professor preparing to cold-call a student. You write precise, fair questions grounded in the assigned reading. You output strict JSON only.";
+  const src = S.caseText
+    ? "OPINION TEXT:\n<<<\n"+S.caseText+"\n>>>"
+    : "No text was provided. The assigned case is: "+S.caseNameOnly+". Rely on your own knowledge. If you do not reliably know this specific case, return exactly {\"unknown\": true}. For source_quote, use a well-known line from the opinion only if you are confident of the exact wording; otherwise use \"\".";
+  const user = src + `
+
+Return ONLY a JSON object of this shape:
+{
+ "case_name": "short case name",
+ "court": "court", "year": "year",
+ "brief": {"facts":"","procedural_posture":"","issue":"","holding":"","rule":"","reasoning":"","disposition":"","separate_opinions":"concurrence/dissent summary or 'None'","significance":"why this case is assigned"},
+ "questions": [
+   {"category":"facts|procedure|issue|holding|reasoning|policy|hypothetical",
+    "question":"what you'd ask aloud, 1-2 sentences, conversational, no greeting and no student name",
+    "model_answer":"2-3 sentence strong answer",
+    "key_points":["2-4 short points a good answer must hit"],
+    "source_quote":"10-40 words copied EXACTLY, character for character, from the opinion that supports the model answer; \\"\\" for hypotheticals"}
+ ]
+}
+Write exactly ${n} questions, in this order: ${order}.
+Hypotheticals must change one key fact from the case and ask whether the outcome changes and why.
+Ground everything in the opinion. Do not invent facts, parties, or quotations.`;
+  return callJSON([{role:"system",content:sys},{role:"user",content:user}], {temperature:0.3});
+}
+
+function enterRoom(){
+  HALL.pick();
+  show("room");
+  $("#feed").innerHTML = "";
+  const p = S.plan;
+  $("#boardCase").textContent = p.case_name || S.caseNameOnly || "Today's case";
+  $("#boardMeta").textContent = [p.court, p.year].filter(Boolean).join(" · ") + "  ·  Professor: " + ({gentle:"The Mentor",socratic:"The Socratic",terror:"The Terror"}[S.style]);
+  renderProg(); renderRunScore();
+  const opener = {
+    gentle: `Good morning, everyone. Let's talk about ${p.case_name||"today's case"}. ${S.addr}, would you help us get started?`,
+    socratic: `${p.case_name||"Today's case"}. Let's see who did the reading… ${S.addr}.`,
+    terror: `${S.addr}. ${p.case_name||"The case"}. Stand up, please.`
+  }[S.style];
+  addMsg("prof", opener);
+  askCurrent(true);
+}
+
+function askCurrent(withOpener){
+  const q = S.questions[S.qi];
+  S.thread = [{role:"Professor", text:q.question}];
+  S.followUps = 0;
+  addMsg("prof", q.question);
+  speak((withOpener? $("#feed").firstChild.lastChild.textContent+" " : "") + q.question);
+  renderProg(); startTimer(); enableAnswer(true);
+  $("#answer").focus();
+}
+
+function addMsg(kind, text){
+  const m = el("div","msg "+kind);
+  if(kind!=="sys") m.appendChild(el("div","who", kind==="prof"?"Professor":"You"));
+  m.appendChild(el("div",null,text));
+  $("#feed").appendChild(m);
+  m.scrollIntoView({behavior:"smooth",block:"end"});
+  S.log.push({who:kind, text});
+  return m;
+}
+function addTyping(){ const m=el("div","msg prof"); m.innerHTML='<div class="who">Professor</div><span class="typing"><i></i><i></i><i></i></span>'; $("#feed").appendChild(m); m.scrollIntoView({behavior:"smooth",block:"end"}); return m; }
+function alertInline(t){ addMsg("sys", t); }
+
+/* ---------- timer ---------- */
+let tInt=null, tStart=0;
+function startTimer(){
+  clearInterval(tInt); tStart = Date.now();
+  const te = $("#timerEl");
+  if(!S.timer){ te.classList.add("hidden"); return; }
+  te.classList.remove("hidden","low","over");
+  const tick=()=>{
+    const left = S.timer - Math.floor((Date.now()-tStart)/1000);
+    const a = Math.abs(left);
+    te.textContent = (left<0?"+":"") + Math.floor(a/60)+":"+String(a%60).padStart(2,"0");
+    te.classList.toggle("low", left<=15 && left>=0); te.classList.toggle("over", left<0);
+  };
+  tick(); tInt = setInterval(tick, 250);
+}
+function stopTimer(){ clearInterval(tInt); return Math.round((Date.now()-tStart)/1000); }
+
+/* ---------- answering ---------- */
+function enableAnswer(on){ ["#answer","#submitBtn","#passBtn","#hintBtn","#micBtn"].forEach(s=>$(s).disabled=!on); }
+$("#submitBtn").onclick = ()=> submitAnswer(false);
+$("#passBtn").onclick = ()=> submitAnswer(true);
+$("#answer").addEventListener("keydown", e=>{ if(e.key==="Enter" && (e.metaKey||e.ctrlKey)){ e.preventDefault(); submitAnswer(false); } });
+$("#hintBtn").onclick = ()=>{
+  const q = S.questions[S.qi];
+  S.hints++; S.questions[S.qi].usedHint = true;
+  const hint = q.source_quote ? "Casebook margin note: “"+q.source_quote+"”" : "Casebook margin note: think about "+(q.key_points||[]).slice(0,1).join("")+".";
+  addMsg("sys", hint + "  (hint used, noted on your scorecard)");
+};
+$("#endEarly").onclick = ()=>{ stopTimer(); finish(); };
+
+async function submitAnswer(passed){
+  if(recOn) rec.stop();
+  const ans = $("#answer").value.trim();
+  if(!passed && !ans){ $("#answer").focus(); return; }
+  const secs = stopTimer();
+  $("#answer").value = "";
+  addMsg("me", passed ? "Um… may I pass?" : ans);
+  S.thread.push({role:"Student", text: passed? "[asks to pass]" : ans});
+  enableAnswer(false);
+  const typing = addTyping();
+  try{
+    const g = await grade(passed, ans, secs);
+    typing.remove();
+    const score = Math.max(0, Math.min(4, Math.round(+g.score||0)));
+    addCoach(g, score, secs);
+    addMsg("prof", g.professor_says || "Hm.");
+    speak(g.professor_says||"");
+    S.thread.push({role:"Professor", text:g.professor_says||""});
+    const canFollow = !passed && S.followUps < 1 && g.follow_up === true && score < 3;
+    if(canFollow){
+      S.followUps++;
+      S.questions[S.qi].firstScore = score;
+      startTimer(); enableAnswer(true); $("#answer").focus();
+      return;
+    }
+    // record final score for this question: average with first attempt if there was a follow-up
+    const q = S.questions[S.qi];
+    const final = q.firstScore!=null ? Math.round(((q.firstScore + score)/2)*10)/10 : score;
+    S.results.push({cat:q.category, score: q.usedHint ? Math.max(0, final-0.5) : final, q:q.question});
+    renderRunScore();
+    S.qi++;
+    if(S.qi >= S.questions.length){ await sleep(900); finish(); }
+    else { await sleep(700); askCurrent(false); }
+  }catch(e){
+    typing.remove();
+    addMsg("sys", "The professor lost their train of thought ("+e.message+"). Try submitting again.");
+    S.thread.pop(); $("#answer").value = passed? "" : ans; enableAnswer(true); startTimer();
+  }
+}
+
+async function grade(passed, ans, secs){
+  const q = S.questions[S.qi];
+  const p = S.plan;
+  const sys = `You are ${PERSONAS[S.style]} You are cold-calling a student in a law school class on ${p.case_name||"the assigned case"}. Address the student as "${S.addr}". You output strict JSON only.`;
+  const exchange = S.thread.map(t=>t.role+": "+t.text).join("\n");
+  const user = `YOUR PRIVATE NOTES (do not read aloud):
+Brief: ${JSON.stringify(p.brief)}
+Current question (${q.category}): ${q.question}
+Model answer: ${q.model_answer}
+Key points: ${(q.key_points||[]).join("; ")}
+
+EXCHANGE ON THIS QUESTION SO FAR:
+${exchange}
+
+${passed ? "The student just asked to pass." : `The student's latest answer took ${secs} seconds${S.timer?` (time limit ${S.timer}s)`:""}.`}
+Follow-up question allowed: ${!passed && S.followUps<1 ? "yes" : "no"}.
+${S.caseText ? "\nOPINION TEXT (for checking):\n<<<\n"+S.caseText+"\n>>>\n" : ""}
+Evaluate the student's latest answer against the model answer and key points (and the opinion). Return ONLY JSON:
+{"score": integer 0-4 (0 = passed or wrong, 1 = mostly wrong, 2 = partly right, 3 = good, 4 = excellent),
+ "got_right": ["short items the student got right"],
+ "missed": ["short items the student missed or got wrong"],
+ "coach_note": "1-2 sentences of honest, specific, out-of-character feedback",
+ "supporting_quote": "10-40 words copied EXACTLY from the opinion that shows the right answer, or \\"\\"",
+ "follow_up": true or false,
+ "professor_says": "what you say aloud, in character, 1-4 sentences"}
+Rules:
+- Grade substance, not polish. A short answer that hits the key points is a 4. Spoken-style answers are fine.
+- If the answer conflicts with the opinion, say so; do not reward invented facts.
+- follow_up may be true only if a follow-up is allowed AND the answer is incomplete or wrong in a way one pointed question could fix. Then professor_says reacts briefly and ENDS with that single follow-up question, without giving away the answer.
+- If follow_up is false, professor_says reacts to the answer (correcting it briefly if needed) and does NOT ask a new question. The next question is asked separately.
+- If the student passed: react in character (a pass is allowed, but it is noticed), give the answer in one sentence, and set follow_up false.
+- Never be cruel, sarcastic about the person, or personal.`;
+  return callJSON([{role:"system",content:sys},{role:"user",content:user}], {temperature:0.5});
+}
+
+function verifyQuote(qt){
+  if(!qt || !S.caseText) return null;
+  const n = norm(qt); if(n.length < 12) return null;
+  if(S.normText.includes(n)) return "exact";
+  const w = n.split(" "); if(w.length < 6) return "missing";
+  let hit=0, tot=0;
+  for(let i=0;i+5<=w.length;i++){ tot++; if(S.normText.includes(w.slice(i,i+5).join(" "))) hit++; }
+  return hit/tot >= 0.6 ? "close" : "missing";
+}
+
+function addCoach(g, score, secs){
+  const c = el("div","coach");
+  const head = el("div","head");
+  head.appendChild(el("b",null,"Coach's note"));
+  const dots = el("span","score"); for(let i=0;i<4;i++){ const d=el("i"); if(i<score) d.className="on"; dots.appendChild(d); } head.appendChild(dots);
+  const lbl = ["Missed","Weak","Partial","Good","Excellent"][score];
+  head.appendChild(el("span","badge "+(score>=3?"b-good":score==2?"b-warn":"b-bad"), lbl));
+  if(S.timer) head.appendChild(el("span","hint", secs+"s" + (secs>S.timer?" (over time)":"")));
+  c.appendChild(head);
+  if(g.coach_note) c.appendChild(el("div",null,g.coach_note));
+  const list = (title, arr, cls)=>{ if(!arr||!arr.length) return; const t=el("div","hint",title); t.style.marginTop="6px"; c.appendChild(t); const ul=el("ul"); arr.forEach(x=>ul.appendChild(el("li",null,x))); c.appendChild(ul); };
+  list("✓ Got right", g.got_right); list("✗ Missed", g.missed);
+  const v = verifyQuote(g.supporting_quote);
+  if(g.supporting_quote){
+    const bq = el("blockquote",null,"“"+g.supporting_quote.replace(/^["“]|["”]$/g,"")+"”");
+    c.appendChild(bq);
+    const tag = v==="exact" ? ["b-good","✓ Verified: appears verbatim in the opinion"] : v==="close" ? ["b-warn","≈ Close paraphrase of the opinion"] : v==="missing" ? ["b-bad","⚠ Not found in the opinion. The AI may have invented this quote"] : ["b-warn","Unverified (no opinion text)"];
+    const b = el("span","badge "+tag[0], tag[1]); b.style.display="inline-block"; b.style.marginTop="6px"; c.appendChild(b);
+  }
+  $("#feed").appendChild(c);
+  S.log.push({who:"coach", text:`[${lbl} ${score}/4] ${g.coach_note||""}${g.supporting_quote?` Quote: "${g.supporting_quote}" (${v||"unverified"})`:""}`});
+}
+
+function renderProg(){
+  const ul = $("#prog"); ul.innerHTML="";
+  (S.questions||[]).forEach((q,i)=>{
+    const li = el("li", i===S.qi?"cur":i<S.qi?"done":"");
+    li.appendChild(el("span",null,(i+1)+". "+(CAT_LABEL[q.category]||q.category)));
+    const r = S.results[i]; li.appendChild(el("span",null, r? r.score+"/4" : i===S.qi?"now":""));
+    ul.appendChild(li);
+  });
+}
+function pct(){ if(!S.results.length) return null; return S.results.reduce((a,r)=>a+r.score,0)/(S.results.length*4); }
+function letter(p){ return p>=.9?"A":p>=.8?"A−":p>=.72?"B+":p>=.62?"B":p>=.52?"B−":p>=.42?"C+":p>=.3?"C":"D"; }
+function renderRunScore(){ const p=pct(); $("#runScore").textContent = p==null?"—":letter(p); $("#runScoreSub").textContent = p==null?"Each answer is scored 0–4.":Math.round(p*100)+"% across "+S.results.length+" question"+(S.results.length>1?"s":""); renderProg(); }
+
+/* ---------- results ---------- */
+async function finish(){
+  enableAnswer(false); if(window.speechSynthesis) speechSynthesis.cancel();
+  if(!S.results.length){ show("setup"); return; }
+  const p = pct();
+  show("results");
+  $("#finalGrade").textContent = letter(p);
+  $("#finalHeadline").textContent = Math.round(p*100)+"% · "+S.results.length+" question"+(S.results.length>1?"s":"")+(S.hints?" · "+S.hints+" hint"+(S.hints>1?"s":"")+" used":"");
+  $("#finalWords").textContent = "The professor is writing your evaluation…";
+  // bars by category
+  const by = {}; S.results.forEach(r=>{ const k=CAT_LABEL[r.cat]||r.cat; (by[k]=by[k]||[]).push(r.score); });
+  const bars = $("#bars"); bars.innerHTML="";
+  Object.entries(by).forEach(([k,arr])=>{
+    const v = arr.reduce((a,b)=>a+b,0)/(arr.length*4);
+    const row = el("div","bar"); row.appendChild(el("span",null,k));
+    const tr = el("div","track"); const f=el("div","fill"); f.style.width=Math.round(v*100)+"%"; tr.appendChild(f); row.appendChild(tr);
+    row.appendChild(el("span","hint",Math.round(v*100)+"%")); bars.appendChild(row);
+  });
+  // brief
+  const b = S.plan.brief||{}; const dl=$("#brief"); dl.innerHTML="";
+  [["Facts","facts"],["Procedural posture","procedural_posture"],["Issue","issue"],["Holding","holding"],["Rule","rule"],["Reasoning","reasoning"],["Disposition","disposition"],["Separate opinions","separate_opinions"],["Why it's assigned","significance"]]
+    .forEach(([l,k])=>{ if(b[k]){ dl.appendChild(el("dt",null,l)); dl.appendChild(el("dd",null,b[k])); } });
+  // AI evaluation
+  try{
+    const ev = await callJSON([
+      {role:"system",content:`You are ${PERSONAS[S.style]} You output strict JSON only.`},
+      {role:"user",content:`A cold call on ${S.plan.case_name} just ended. Transcript with coach notes:\n${S.log.map(l=>l.who.toUpperCase()+": "+l.text).join("\n")}\n\nReturn ONLY JSON: {"parting_words":"1-2 sentences you say to ${S.addr} as class ends, in character","strengths":["2-3 specific strengths"],"work_on":["2-3 specific things to work on"],"tip":"one concrete study tip for this case"}`}
+    ], {temperature:0.6});
+    $("#finalWords").textContent = "“"+(ev.parting_words||"Class dismissed.")+"”";
+    const fill=(id,arr)=>{ const ul=$(id); ul.innerHTML=""; (arr||[]).forEach(x=>ul.appendChild(el("li",null,x))); };
+    fill("#strengths",ev.strengths); fill("#workon",ev.work_on);
+    $("#tip").textContent = ev.tip ? "Tip: "+ev.tip : "";
+    S.evaluation = ev;
+  }catch(e){ $("#finalWords").textContent = "“Class dismissed.”"; }
+}
+
+$("#dlBtn").onclick = ()=>{
+  const p=S.plan, lines=[`# Cold call: ${p.case_name||""}`, `Professor: ${S.style} · Score: ${letter(pct())} (${Math.round(pct()*100)}%) · ${new Date().toLocaleString()}`, ""];
+  S.log.forEach(l=> lines.push(l.who==="prof"?`**Professor:** ${l.text}`:l.who==="me"?`**${S.addr}:** ${l.text}`:l.who==="coach"?`> ${l.text}`:`_${l.text}_`, ""));
+  if(S.evaluation){ lines.push("## Evaluation", S.evaluation.parting_words||"", "", "Strengths:", ...(S.evaluation.strengths||[]).map(x=>"- "+x), "", "Work on:", ...(S.evaluation.work_on||[]).map(x=>"- "+x), "", "Tip: "+(S.evaluation.tip||""), ""); }
+  lines.push("## Brief"); Object.entries(p.brief||{}).forEach(([k,v])=>lines.push(`**${k.replace(/_/g," ")}:** ${v}`,""));
+  const blob = new Blob([lines.join("\n")],{type:"text/markdown"});
+  const a = document.createElement("a"); a.href=URL.createObjectURL(blob); a.download="cold-call-"+(p.case_name||"case").replace(/[^a-z0-9]+/gi,"-").toLowerCase()+".md"; a.click();
+};
+$("#againBtn").onclick = ()=> startSession(true);
+$("#newBtn").onclick = ()=> show("setup");
+
+loadModels(); updateChip();
+</script>
+</body>
+</html>
