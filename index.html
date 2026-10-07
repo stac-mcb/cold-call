@@ -752,7 +752,7 @@ async function submitAnswer(passed){
     addMsg("prof", g.professor_says || "Hm.");
     speak(g.professor_says||"");
     S.thread.push({role:"Professor", text:g.professor_says||""});
-    const canFollow = !passed && S.followUps < 1 && g.follow_up === true && score < 3;
+    const canFollow = !passed && S.followUps < 1 && g.follow_up === true && score < 4;
     if(canFollow){
       S.followUps++;
       S.questions[S.qi].firstScore = score;
