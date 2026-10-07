@@ -270,7 +270,7 @@ header.top p{font-size:15.5px;margin:12px 0 16px}
       <div class="grid">
         <div>
           <label for="model">Model (via OpenRouter)</label>
-          <select id="model"><option value="auto">Auto: GPT-5 nano, fall back to free models</option></select>
+          <select id="model"><option value="auto">Auto: best available (GPT-5 nano if the key has credit, else free models)</option></select>
         </div>
         <div>
           <label for="userKey">Use your own OpenRouter key (optional)</label>
@@ -291,7 +291,7 @@ header.top p{font-size:15.5px;margin:12px 0 16px}
   <div class="card loading">
     <div class="typing"><i></i><i></i><i></i></div>
     <div class="serif" id="loadingLine">The professor is reading the opinion…</div>
-    <div class="hint">Writing a brief and a question plan. This takes 10–40 seconds.</div>
+    <div class="hint">Writing a brief and a question plan. This usually takes 10–60 seconds.</div>
   </div>
 </section>
 
@@ -386,13 +386,15 @@ function words(s){ return (String(s).trim().match(/\S+/g)||[]).length; }
 /* ===================== MODELS ===================== */
 let FREE_MODELS = [];
 let lastGoodModel = "";
+let paidBlocked = false;
 async function loadModels(){
   try{
     const r = await fetch("https://openrouter.ai/api/v1/models");
     const data = (await r.json()).data || [];
-    const pref = [/deepseek.*(chat|v3)/i,/llama-3\.3-70b/i,/gemini/i,/gpt-oss-120b/i,/qwen3-235b|qwen-2\.5-72b/i,/mistral-small/i,/glm/i];
+    const pref = [/nemotron-3-super/i,/apodex/i,/ling-3/i,/deepseek/i,/llama-3\.3-70b/i,/gpt-oss-120b/i,/qwen3/i,/gemma/i,/nemotron-3-ultra/i,/mistral/i,/glm/i];
     const rank = id => { const i = pref.findIndex(p=>p.test(id)); return i<0?99:i; };
-    FREE_MODELS = data.filter(m => m.id.endsWith(":free") && (m.context_length||0) >= 32000 && !/vision|-vl|image|audio|embed|guard|coder/i.test(m.id))
+    FREE_MODELS = data.filter(m => m.id.endsWith(":free") && (m.context_length||0) >= 32000
+        && !/vision|-vl|image|audio|embed|guard|safety|coder|code|omni|inkling|lfm|-xs-|tiny/i.test(m.id))
       .sort((a,b)=> rank(a.id)-rank(b.id) || (b.context_length||0)-(a.context_length||0)).map(m=>m.id);
   }catch(e){ FREE_MODELS = []; }
   const sel = $("#model");
@@ -405,59 +407,72 @@ async function loadModels(){
 }
 function candidates(){
   const choice = $("#model").value;
-  const auto = ["openai/gpt-5-nano", ...FREE_MODELS.slice(0,5)];
-  let list = choice==="auto" ? auto : [choice, ...auto.filter(x=>x!==choice)];
-  if(lastGoodModel && choice==="auto") list = [lastGoodModel, ...list.filter(x=>x!==lastGoodModel)];
+  let list = [...(paidBlocked?[]:["openai/gpt-5-nano"]), ...FREE_MODELS.slice(0,6)];
+  if(choice!=="auto" && !(paidBlocked && /^openai\//.test(choice))) list = [choice, ...list.filter(x=>x!==choice)];
+  if(lastGoodModel) list = [lastGoodModel, ...list.filter(x=>x!==lastGoodModel)];
   return list;
 }
+const shortName = m => m.replace(/:free$/,"").split("/").pop();
 function updateChip(model){
   const chip = $("#modelChip");
   if(!apiKey()){ chip.classList.add("off"); $("#modelChipText").textContent = "No API key set"; return; }
   chip.classList.remove("off");
-  $("#modelChipText").textContent = model ? ("Live · " + model.replace(/:free$/,"")) : "OpenRouter ready";
+  $("#modelChipText").textContent = model ? ("Live · " + shortName(model)) : "OpenRouter ready";
   if(model) $("#footModel").textContent = "Model: " + model + ".";
 }
 
 /* ===================== LLM CALL ===================== */
-async function callLLM(messages, {temperature=0.4} = {}){
-  const key = apiKey();
-  if(!key) throw new Error("No OpenRouter API key is configured for this app. Open Advanced settings and paste one.");
-  let lastErr;
-  for(const model of candidates().slice(0,6)){
-    try{
-      const body = { model, messages, temperature };
-      if(/^openai\/gpt-5/.test(model)){ delete body.temperature; body.reasoning = { effort: "low" }; }
-      const r = await fetch(OR_URL, {
-        method:"POST",
-        headers:{ "Authorization":"Bearer "+key, "Content-Type":"application/json",
-                  "HTTP-Referer": location.origin && location.origin!=="null" ? location.origin : "https://coldcall.app", "X-Title":"The Cold Call" },
-        body: JSON.stringify(body)
-      });
-      const d = await r.json().catch(()=>({}));
-      if(r.status===401) throw Object.assign(new Error("The OpenRouter key was rejected (401). It may have been revoked."), {fatal:true});
-      if(!r.ok){ lastErr = new Error(model+": "+((d.error&&d.error.message)||("HTTP "+r.status))); continue; }
-      const txt = d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content || "";
-      if(!txt.trim()){ lastErr = new Error(model+": empty reply"); continue; }
-      lastGoodModel = model; updateChip(model);
-      return txt;
-    }catch(e){ lastErr = e; if(e.fatal) break; }
+// Tries models in order; if one is slow, a second one is started in parallel ("hedging"). First valid answer wins.
+async function tryModel(model, messages, temperature, signal){
+  const body = { model, messages, temperature };
+  if(/^openai\/gpt-5/.test(model)){ delete body.temperature; body.reasoning = { effort: "low" }; }
+  const r = await fetch(OR_URL, { method:"POST", signal,
+    headers:{ "Authorization":"Bearer "+apiKey(), "Content-Type":"application/json",
+              "HTTP-Referer": location.origin && location.origin!=="null" ? location.origin : "https://coldcall.app", "X-Title":"The Cold Call" },
+    body: JSON.stringify(body) });
+  const d = await r.json().catch(()=>({}));
+  if(r.status===401) throw Object.assign(new Error("The OpenRouter key was rejected (401). It may have been revoked."), {fatal:true});
+  if(!r.ok){
+    const msg = (d.error&&d.error.message)||("HTTP "+r.status);
+    if(/^openai\//.test(model) && (r.status===402 || r.status===403 || /limit|credit/i.test(msg))) paidBlocked = true;
+    throw new Error(shortName(model)+": "+msg);
   }
-  throw lastErr || new Error("Every model failed.");
+  const txt = d.choices && d.choices[0] && d.choices[0].message && d.choices[0].message.content || "";
+  if(!txt.trim()) throw new Error(shortName(model)+": empty reply");
+  return txt;
+}
+function callLLM(messages, {temperature=0.4, parse=null} = {}){
+  if(!apiKey()) return Promise.reject(new Error("No OpenRouter API key is configured for this app. Open Advanced settings and paste one."));
+  const list = candidates().slice(0,7);
+  return new Promise((resolve, reject)=>{
+    let idx=0, active=0, done=false, lastErr=null, hedge=null; const ctls=[];
+    const finish=(ok,val)=>{ if(done) return; done=true; clearTimeout(hedge); ctls.forEach(c=>{ try{c.abort();}catch(e){} }); ok?resolve(val):reject(val); };
+    const launch=()=>{
+      if(done) return;
+      if(idx>=list.length){ if(active===0) finish(false, lastErr||new Error("Every model failed.")); return; }
+      const model=list[idx++]; active++;
+      const ctl=new AbortController(); ctls.push(ctl);
+      const to=setTimeout(()=>ctl.abort(), 80000);
+      $("#modelChipText").textContent = "Asking " + shortName(model) + "…";
+      clearTimeout(hedge); hedge=setTimeout(launch, 25000);
+      tryModel(model, messages, temperature, ctl.signal)
+        .then(txt=>{ const val = parse ? parse(txt) : txt; lastGoodModel=model; updateChip(model); finish(true, val); })
+        .catch(e=>{ if(done) return; lastErr = e.name==="AbortError" ? new Error(shortName(model)+": timed out") : e; if(e.fatal) finish(false, e); })
+        .finally(()=>{ clearTimeout(to); active--; if(!done) launch(); });
+    };
+    launch();
+  });
 }
 function parseJSON(txt){
   let t = String(txt).replace(/```(?:json)?/gi,"").trim();
   const a = t.indexOf("{"), b = t.lastIndexOf("}");
-  if(a<0||b<0) throw new Error("no JSON");
+  if(a<0||b<0) throw new Error("reply was not JSON");
   t = t.slice(a,b+1);
   try{ return JSON.parse(t); }catch(e){ return JSON.parse(t.replace(/,\s*([}\]])/g,"$1")); }
 }
-async function callJSON(messages, opts){
-  const txt = await callLLM(messages, opts);
-  try{ return parseJSON(txt); }
-  catch(e){
-    const txt2 = await callLLM([...messages, {role:"assistant",content:txt}, {role:"user",content:"That was not valid JSON. Reply again with ONLY the JSON object, nothing else."}], opts);
-    return parseJSON(txt2);
-  }
+function callJSON(messages, opts={}){
+  const check = opts.check || (()=>true);
+  return callLLM(messages, {...opts, parse: txt=>{ const j=parseJSON(txt); if(!check(j)) throw new Error("incomplete JSON"); return j; }});
 }
 
 /* ===================== STATE ===================== */
@@ -647,7 +662,7 @@ Return ONLY a JSON object of this shape:
 Write exactly ${n} questions, in this order: ${order}.
 Hypotheticals must change one key fact from the case and ask whether the outcome changes and why.
 Ground everything in the opinion. Do not invent facts, parties, or quotations.`;
-  return callJSON([{role:"system",content:sys},{role:"user",content:user}], {temperature:0.3});
+  return callJSON([{role:"system",content:sys},{role:"user",content:user}], {temperature:0.3, check:j=> j.unknown || (Array.isArray(j.questions) && j.questions.length>0)});
 }
 
 function enterRoom(){
@@ -791,7 +806,7 @@ Rules:
 - If follow_up is false, professor_says reacts to the answer (correcting it briefly if needed) and does NOT ask a new question. The next question is asked separately.
 - If the student passed: react in character (a pass is allowed, but it is noticed), give the answer in one sentence, and set follow_up false.
 - Never be cruel, sarcastic about the person, or personal.`;
-  return callJSON([{role:"system",content:sys},{role:"user",content:user}], {temperature:0.5});
+  return callJSON([{role:"system",content:sys},{role:"user",content:user}], {temperature:0.5, check:j=> typeof j.professor_says==="string" && j.score!=null});
 }
 
 function verifyQuote(qt){
